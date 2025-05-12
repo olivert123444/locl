@@ -13,10 +13,12 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { getUserProfile } from '@/lib/supabase';
+import { getUserProfile, deleteListing } from '@/lib/supabase';
+import { getCurrentLocation } from '@/lib/locationService';
+import AvatarUpload from '@/components/AvatarUpload';
+import BottomTabBar from '@/components/BottomTabBar';
 
 export default function ProfileScreen() {
   const { user, signOut } = useAuth();
@@ -30,14 +32,50 @@ export default function ProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const [locationVisible, setLocationVisible] = useState(true);
+  const [devToolsTapCount, setDevToolsTapCount] = useState(0);
+  const [showDevTools, setShowDevTools] = useState(false);
 
   useEffect(() => {
     if (user) {
       fetchProfile();
       fetchUserListings();
       fetchSavedItems();
+      updateUserLocation();
     }
   }, [user]);
+  
+  // Update user's location in their profile
+  const updateUserLocation = async () => {
+    if (!user) return;
+    
+    try {
+      // Get current location
+      const locationData = await getCurrentLocation();
+      
+      if (locationData) {
+        console.log('Got current location for profile:', locationData);
+        
+        // Update the user's profile with the current location
+        const { error } = await supabase
+          .from('users')
+          .update({ location: locationData })
+          .eq('id', user.id);
+          
+        if (error) {
+          console.error('Error updating user location:', error);
+        } else {
+          console.log('Updated user profile with current location');
+          // Update local profile state
+          setProfile((prev: any) => ({
+            ...prev,
+            location: locationData
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('Error getting or updating location:', error);
+    }
+  };
 
   const fetchProfile = async () => {
     try {
@@ -62,36 +100,8 @@ export default function ProfileScreen() {
 
       if (error) throw error;
       
-      // Add placeholder listings for demo if none exist
-      if (!data || data.length === 0) {
-        const dummyListings = [
-          {
-            id: 'dummy-1',
-            title: 'Vintage Record Player',
-            description: 'Barely used vintage record player in excellent condition',
-            price: 120,
-            category: 'Electronics',
-            main_image_url: 'https://images.unsplash.com/photo-1545454675-3531b543be5d',
-            seller_id: user.id,
-            status: 'active',
-            created_at: new Date().toISOString()
-          },
-          {
-            id: 'dummy-2',
-            title: 'Mountain Bike',
-            description: 'Great condition mountain bike, perfect for trails',
-            price: 250,
-            category: 'Sports',
-            main_image_url: 'https://images.unsplash.com/photo-1532298229144-0ec0c57515c7',
-            seller_id: user.id,
-            status: 'active',
-            created_at: new Date().toISOString()
-          }
-        ];
-        setListings(dummyListings);
-      } else {
-        setListings(data);
-      }
+      // Set listings from data
+      setListings(data || []);
     } catch (error) {
       console.error('Error fetching listings:', error);
     } finally {
@@ -103,45 +113,43 @@ export default function ProfileScreen() {
     try {
       if (!user) return;
       
-      // In a real app, we would fetch saved items from the database
-      // For now, we'll use dummy data
-      const dummySavedItems = [
-        {
-          id: 'saved-1',
-          title: 'Leather Sofa',
-          description: 'Beautiful leather sofa in great condition',
-          price: 350,
-          category: 'Furniture',
-          main_image_url: 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc',
-          seller_id: 'other-user-1',
-          status: 'active',
-          created_at: new Date().toISOString()
-        },
-        {
-          id: 'saved-2',
-          title: 'iPhone 12',
-          description: 'Like new iPhone 12, 128GB storage',
-          price: 450,
-          category: 'Electronics',
-          main_image_url: 'https://images.unsplash.com/photo-1605236453806-6ff36851218e',
-          seller_id: 'other-user-2',
-          status: 'active',
-          created_at: new Date().toISOString()
-        }
-      ];
+      // Fetch archived listings from the database
+      const { data, error } = await supabase
+        .from('archive')
+        .select(`
+          id,
+          listing_id,
+          listings!inner(id, title, description, price, category, images, seller_id, status, created_at)
+        `)
+        .eq('user_id', user.id);
       
-      setSavedItems(dummySavedItems);
+      if (error) throw error;
+      
+      // Transform the data to get the listings
+      const archivedListings = data?.map(item => ({
+        ...item.listings,
+        archive_id: item.id
+      })) || [];
+      
+      setSavedItems(archivedListings);
     } catch (error) {
       console.error('Error fetching saved items:', error);
+      setSavedItems([]);
     }
   };
 
   const handleSignOut = async () => {
     try {
+      setIsLoading(true);
+      setSettingsModalVisible(false); // Close the settings modal first
       await signOut();
+      console.log('User signed out successfully');
       router.replace('/(auth)/login');
     } catch (error) {
       console.error('Error signing out:', error);
+      Alert.alert('Error', 'Failed to sign out. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -160,8 +168,73 @@ export default function ProfileScreen() {
     setSettingsModalVisible(!settingsModalVisible);
   };
   
+  // This is a duplicate function that was added by mistake
+  
   const handleCreateListing = () => {
     router.push('/create-listing');
+  };
+  
+  // Handle taps on profile header to activate dev tools
+  const handleHeaderTap = () => {
+    setDevToolsTapCount(prevCount => {
+      const newCount = prevCount + 1;
+      if (newCount >= 7) {
+        setShowDevTools(true);
+        return 0; // Reset counter
+      }
+      return newCount;
+    });
+  };
+  
+  // Navigate to dev tools
+  const navigateToDevTools = () => {
+    router.push('/dev-tools');
+  };
+  
+  // Helper function to format location display in a user-friendly way
+  const getLocationDisplay = (location: any): string => {
+    if (!location) return 'No location set';
+    
+    try {
+      // If location is a string, try to parse it
+      const locationObj = typeof location === 'string' ? JSON.parse(location) : location;
+      
+      // First priority: use the city name if available
+      // This is the most user-friendly option and comes from our geocoding service
+      if (locationObj.city) {
+        // If we have a region/state and it's not already part of the city name
+        if (locationObj.region && !locationObj.city.includes(locationObj.region)) {
+          return `${locationObj.city}, ${locationObj.region}`;
+        }
+        return locationObj.city;
+      }
+      
+      // Second priority: use the full address if available
+      if (locationObj.address) return locationObj.address;
+      
+      // Third priority: try to build from components
+      const region = locationObj.region;
+      const country = locationObj.country;
+      
+      if (region) {
+        return country ? `${region}, ${country}` : region;
+      }
+      
+      if (country) {
+        return country;
+      }
+      
+      // Last resort: if we have coordinates but no readable location
+      // Instead of showing raw coordinates, use a friendly message
+      if (locationObj.latitude && locationObj.longitude) {
+        return 'Nearby Location';
+      }
+      
+      return 'Location available';
+    } catch (error) {
+      console.error('Error parsing location:', error);
+      return 'Location available'; // More user-friendly than 'Location format error'
+    }
   };
   
   const handleDeleteListing = async (listingId: string) => {
@@ -178,24 +251,22 @@ export default function ProfileScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              // For dummy listings, just filter them out
-              if (listingId.startsWith('dummy-')) {
-                setListings(listings.filter(listing => listing.id !== listingId));
+              if (!user) {
+                Alert.alert('Error', 'You must be logged in to delete listings.');
                 return;
               }
               
-              const { error } = await supabase
-                .from('listings')
-                .delete()
-                .eq('id', listingId);
-                
-              if (error) throw error;
+              // Use the new deleteListing function from supabase.ts
+              const result = await deleteListing(listingId, user.id);
+              
+              // Show success message
+              Alert.alert('Success', 'Listing has been deleted successfully.');
               
               // Refresh listings
               fetchUserListings();
-            } catch (error) {
+            } catch (error: any) {
               console.error('Error deleting listing:', error);
-              Alert.alert('Error', 'Failed to delete listing. Please try again.');
+              Alert.alert('Error', error.message || 'Failed to delete listing. Please try again.');
             }
           },
         },
@@ -203,21 +274,33 @@ export default function ProfileScreen() {
     );
   };
 
+  // Handle avatar update from the AvatarUpload component
+  const handleAvatarUpdated = (newUrl: string) => {
+    if (profile) {
+      setProfile({ ...profile, avatar_url: newUrl });
+    }
+  };
+
   return (
     <View style={styles.container}>
       <ScrollView style={styles.scrollContainer}>
         {/* Profile Header */}
-        <View style={styles.header}>
+        <TouchableOpacity style={styles.header} onPress={handleHeaderTap} activeOpacity={1}>
           <View style={styles.profileInfoRow}>
-            <Image 
-              source={profile?.avatar_url ? { uri: profile.avatar_url } : require('../../assets/images/adaptive-icon.png')} 
-              style={styles.avatar} 
-            />
+            {/* Using our new AvatarUpload component */}
+            {user && (
+              <AvatarUpload
+                userId={user.id}
+                currentAvatarUrl={profile?.avatar_url}
+                size={80}
+                onAvatarUpdated={handleAvatarUpdated}
+              />
+            )}
             <View style={styles.userInfo}>
               <Text style={styles.userName}>{profile?.full_name || 'User'}</Text>
               <Text style={styles.userLocation}>
                 <Ionicons name="location-outline" size={14} color="#666" />{' '}
-                {profile?.location?.city || 'No location set'}
+                {getLocationDisplay(profile?.location)}
               </Text>
               <Text style={styles.userJoined}>
                 <Ionicons name="calendar-outline" size={14} color="#666" />{' '}
@@ -263,7 +346,14 @@ export default function ProfileScreen() {
             <Text style={styles.aboutTitle}>About Me</Text>
             <Text style={styles.aboutText}>{profile?.bio || 'No bio yet. Tap Edit Profile to add one!'}</Text>
           </View>
-        </View>
+          
+          {showDevTools && (
+            <TouchableOpacity style={styles.devToolsButton} onPress={navigateToDevTools}>
+              <Ionicons name="code-outline" size={16} color="#FFFFFF" />
+              <Text style={styles.devToolsButtonText}>Dev Tools</Text>
+            </TouchableOpacity>
+          )}
+        </TouchableOpacity>
 
         {/* Tabs */}
         <View style={styles.tabsContainer}>
@@ -305,7 +395,11 @@ export default function ProfileScreen() {
                         onPress={() => handleViewListing(listing.id)}
                       >
                         <Image 
-                          source={listing.main_image_url ? { uri: listing.main_image_url } : require('../../assets/images/icon.png')} 
+                          source={
+                            Array.isArray(listing.images) && listing.images.length > 0 
+                              ? { uri: listing.images[0] } 
+                              : require('../../assets/images/icon.png')
+                          } 
                           style={styles.listingImage} 
                         />
                         <View style={styles.listingDetails}>
@@ -457,14 +551,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    marginRight: 15,
-  },
   userInfo: {
     flex: 1,
+    marginLeft: 15,
   },
   userName: {
     fontSize: 20,
@@ -733,5 +822,21 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 16,
+  },
+  devToolsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FF9500',
+    paddingVertical: 8,
+    paddingHorizontal: 15,
+    borderRadius: 20,
+    alignSelf: 'center',
+    marginTop: 15,
+    justifyContent: 'center',
+  },
+  devToolsButtonText: {
+    marginLeft: 5,
+    color: '#fff',
+    fontWeight: '600',
   },
 });

@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { User as SupabaseUser, AuthChangeEvent } from '@supabase/supabase-js';
-import { addDebugLog } from '@/components/DebugOverlay';
 
 // Enable debug logging
 const DEBUG = true;
@@ -12,10 +11,8 @@ const log = {
     if (DEBUG) {
       if (data) {
         console.log(`[AUTH] 🔵 ${message}`, data);
-        addDebugLog('info', `[AUTH] ${message}`, data);
       } else {
         console.log(`[AUTH] 🔵 ${message}`);
-        addDebugLog('info', `[AUTH] ${message}`);
       }
     }
   },
@@ -23,10 +20,8 @@ const log = {
     if (DEBUG) {
       if (data) {
         console.log(`[AUTH] ✅ ${message}`, data);
-        addDebugLog('success', `[AUTH] ${message}`, data);
       } else {
         console.log(`[AUTH] ✅ ${message}`);
-        addDebugLog('success', `[AUTH] ${message}`);
       }
     }
   },
@@ -34,10 +29,8 @@ const log = {
     if (DEBUG) {
       if (data) {
         console.warn(`[AUTH] ⚠️ ${message}`, data);
-        addDebugLog('warn', `[AUTH] ${message}`, data);
       } else {
         console.warn(`[AUTH] ⚠️ ${message}`);
-        addDebugLog('warn', `[AUTH] ${message}`);
       }
     }
   },
@@ -45,10 +38,8 @@ const log = {
     if (DEBUG) {
       if (error) {
         console.error(`[AUTH] ❌ ${message}`, error);
-        addDebugLog('error', `[AUTH] ${message}`, error);
       } else {
         console.error(`[AUTH] ❌ ${message}`);
-        addDebugLog('error', `[AUTH] ${message}`);
       }
     }
   }
@@ -151,22 +142,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return null;
       }
       
-      // Ensure boolean values are correctly typed
-      const profile = {
-        ...data,
-        // Explicitly convert to boolean using === true comparison
-        is_onboarded: Boolean(data.is_onboarded),  // Convert to boolean more loosely
-        is_seller: data.is_seller === true,
-        is_buyer: data.is_buyer === true
-      } as UserProfile;
-      
       log.success('User profile fetched successfully', { 
-        userId: profile.id, 
-        isOnboarded: profile.is_onboarded,
-        isOnboardedRawValue: data.is_onboarded,
-        isOnboardedValueType: typeof data.is_onboarded,
-        hasLocation: !!profile.location
+        userId: data.id, 
+        isOnboarded: data.is_onboarded,
+        hasLocation: !!data.location
       });
+      
+      const profile = data as UserProfile;
       
       // Update the userProfile state
       setUserProfile(profile);
@@ -219,22 +201,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email: session.user.email 
       });
       
-      // Get the user profile from the database before updating any state
-      // This ensures we don't have a state where user exists but profile doesn't
-      const profile = await fetchUserProfile(session.user);
+      // First update the auth user state so we're not showing loading for too long
+      setUser(session.user);
       
-      // Only if we have a profile, we create a complete user object with profile
-      if (profile) {
-        const completeUser: User = {
-          ...session.user,
-          profile
-        };
-        // Update user state only after we have the complete profile
-        setUser(completeUser);
-      } else {
-        // If no profile exists, just set the basic user info
-        setUser(session.user);
-      }
+      // Get the latest user profile from the database
+      const profile = await fetchUserProfile(session.user);
       
       return profile;
     } catch (error) {
@@ -261,49 +232,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     
     try {
-      // Ensure boolean values are properly typed
-      const processedUpdates = { ...updates };
+      log.info('Updating user profile', { userId: user.id, updates });
       
-      // Explicitly ensure boolean fields are properly typed
-      if ('is_onboarded' in processedUpdates) {
-        processedUpdates.is_onboarded = processedUpdates.is_onboarded === true;
-        log.info('Processing is_onboarded value', { 
-          rawValue: updates.is_onboarded,
-          processedValue: processedUpdates.is_onboarded,
-          valueType: typeof processedUpdates.is_onboarded
-        });
-      }
-      
-      if ('is_seller' in processedUpdates) {
-        processedUpdates.is_seller = processedUpdates.is_seller === true;
-      }
-      
-      if ('is_buyer' in processedUpdates) {
-        processedUpdates.is_buyer = processedUpdates.is_buyer === true;
-      }
-      
-      // Ensure text fields are properly handled
-      if ('full_name' in processedUpdates && processedUpdates.full_name) {
-        processedUpdates.full_name = processedUpdates.full_name.trim();
-      }
-      
-      if ('bio' in processedUpdates) {
-        processedUpdates.bio = processedUpdates.bio ? processedUpdates.bio.trim() : null;
-      }
-      
-      log.info('Updating user profile', { 
-        userId: user.id,
-        fullName: processedUpdates.full_name,
-        bio: processedUpdates.bio ? 'Present' : 'Not provided',
-        avatarUrl: processedUpdates.avatar_url ? 'Present' : 'Not provided',
-        isOnboarded: processedUpdates.is_onboarded,
-        isSeller: processedUpdates.is_seller,
-        isBuyer: processedUpdates.is_buyer
-      });
+      // Ensure we have the id field
+      const updateData = { ...updates };
       
       const { data, error } = await supabase
         .from('users')
-        .update(processedUpdates)
+        .update(updateData)
         .eq('id', user.id)
         .select('*')
         .single();
@@ -318,26 +254,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return null;
       }
       
-      // Ensure the returned profile has correct boolean types
-      const updatedProfile = {
-        ...data,
-        is_onboarded: Boolean(data.is_onboarded),  // Convert to boolean more loosely
-        is_seller: data.is_seller === true,
-        is_buyer: data.is_buyer === true
-      } as UserProfile;
-      
       log.success('User profile updated successfully', { 
-        userId: updatedProfile.id,
-        fullName: updatedProfile.full_name,
-        bio: updatedProfile.bio ? 'Present' : 'Not provided',
-        avatarUrl: updatedProfile.avatar_url ? 'Present' : 'Not provided',
-        isOnboarded: updatedProfile.is_onboarded,
-        isSeller: updatedProfile.is_seller,
-        isBuyer: updatedProfile.is_buyer,
-        isOnboardedRawValue: data.is_onboarded,
-        isOnboardedValueType: typeof data.is_onboarded,
-        updatedFields: Object.keys(updates)
+        userId: data.id,
+        isOnboarded: data.is_onboarded,
+        updates: Object.keys(updates)
       });
+      
+      const updatedProfile = data as UserProfile;
       
       // Update the userProfile state
       setUserProfile(updatedProfile);
@@ -365,35 +288,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         log.info('Initializing auth state');
         
-        // Ensure loading state is true at the beginning
-        setLoading(true);
-        
-        // Get current session first before updating any state
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        
-        if (sessionError || !session || !session.user) {
-          // Handle no session case
-          log.info('No valid session during initialization');
-          setUser(null);
-          setUserProfile(null);
-          return;
-        }
-        
-        // First fetch the complete profile
-        const profile = await fetchUserProfile(session.user);
-        
-        // Then update both user and profile simultaneously to prevent intermediate state
-        if (profile) {
-          const completeUser: User = {
-            ...session.user,
-            profile
-          };
-          // Update user with complete profile in a single state update
-          setUser(completeUser);
-        } else {
-          // If no profile exists, just set the basic user
-          setUser(session.user);
-        }
+        // Attempt to get the current user and profile
+        await fetchCurrentUser();
         
         log.success('Auth initialization complete');
       } catch (error) {

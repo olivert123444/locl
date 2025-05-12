@@ -3,12 +3,16 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator
 import { useRouter } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
 
 export default function PermissionsSetup() {
   const router = useRouter();
+  const { user } = useAuth();
   const [cameraPermission, setCameraPermission] = useState<boolean | null>(null);
   const [notificationPermission, setNotificationPermission] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     checkPermissions();
@@ -99,9 +103,44 @@ export default function PermissionsSetup() {
     }
   };
 
-  const handleContinue = () => {
-    // Navigate to the main app
-    router.push('/');
+  const handleContinue = async () => {
+    if (!user) {
+      console.error('No authenticated user found');
+      return;
+    }
+    
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      console.log('Finalizing onboarding process for user:', user.id);
+      
+      // Ensure the user is marked as onboarded in the database
+      const { error } = await supabase
+        .from('users')
+        .update({ 
+          is_onboarded: true,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', user.id);
+      
+      if (error) {
+        console.error('Error updating onboarding status:', error);
+        throw error;
+      }
+      
+      console.log('Onboarding completed successfully');
+      
+      // Add a small delay to ensure the database update propagates
+      setTimeout(() => {
+        // Navigate to the main app
+        router.push('/');
+      }, 500);
+    } catch (err) {
+      console.error('Error completing onboarding:', err);
+      setError('Failed to complete setup. Please try again.');
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -111,6 +150,8 @@ export default function PermissionsSetup() {
         <Text style={styles.subtitle}>
           To get the most out of Locl, we need a few permissions. These help you take photos of items to sell and stay updated on offers.
         </Text>
+        
+        {error && <Text style={styles.errorText}>{error}</Text>}
 
         <View style={styles.permissionCard}>
           <View style={styles.permissionHeader}>
@@ -247,14 +288,20 @@ const styles = StyleSheet.create({
   },
   button: {
     backgroundColor: '#007AFF',
-    paddingVertical: 15,
-    borderRadius: 10,
+    paddingVertical: 16,
+    borderRadius: 12,
     alignItems: 'center',
     marginTop: 20,
   },
   buttonText: {
-    color: 'white',
+    color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  errorText: {
+    color: '#FF3B30',
+    fontSize: 14,
+    textAlign: 'center',
+    marginVertical: 10,
   },
 });

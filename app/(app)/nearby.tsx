@@ -13,9 +13,6 @@ import {
   Alert,
   Animated,
   Easing,
-  PanResponder,
-  GestureResponderEvent,
-  PanResponderGestureState,
   ActivityIndicator
 } from 'react-native';
 import Swiper from 'react-native-deck-swiper';
@@ -32,59 +29,20 @@ interface Product {
   title: string;
   price: number;
   distance: number;
+  formattedDistance?: string; // Add formatted distance for display
   image: string;
   seller: string;
+  seller_id: string;
   description: string;
+  location?: {
+    latitude: number;
+    longitude: number;
+    address?: string;
+  };
 }
 
-// Sample product data
-const sampleProducts: Product[] = [
-  {
-    id: '1',
-    title: 'Vintage Record Player',
-    price: 120,
-    distance: 2.5, // km
-    image: 'https://images.unsplash.com/photo-1545454675-3531b543be5d',
-    seller: 'Maria Garcia',
-    description: 'Fully functional vintage record player from the 1970s. Recently serviced and in excellent working condition.',
-  },
-  {
-    id: '2',
-    title: 'Mountain Bike - Trek 3500',
-    price: 250,
-    distance: 4.2, // km
-    image: 'https://images.unsplash.com/photo-1532298229144-0ec0c57515c7',
-    seller: 'John Smith',
-    description: 'Barely used mountain bike, perfect for trails. Features 21 speeds, front suspension, and disc brakes.',
-  },
-  {
-    id: '3',
-    title: 'iPhone 12 Pro - 128GB',
-    price: 400,
-    distance: 1.8, // km
-    image: 'https://images.unsplash.com/photo-1605236453806-6ff36851218e',
-    seller: 'Alex Johnson',
-    description: 'iPhone 12 Pro in great condition, includes charger and original box. No scratches or dents.',
-  },
-  {
-    id: '4',
-    title: 'Handmade Ceramic Vase Set',
-    price: 65,
-    distance: 3.5, // km
-    image: 'https://images.unsplash.com/photo-1612196808214-b8e1d6145a8c',
-    seller: 'Emma Wilson',
-    description: 'Set of 3 handmade ceramic vases in varying sizes. Each piece is unique with a beautiful blue glaze finish.',
-  },
-  {
-    id: '5',
-    title: 'Leather Messenger Bag',
-    price: 85,
-    distance: 5.1, // km
-    image: 'https://images.unsplash.com/photo-1548036328-c9fa89d128fa',
-    seller: 'David Kim',
-    description: 'Genuine leather messenger bag, perfect for laptops up to 15". Features multiple compartments and adjustable strap.',
-  },
-];
+// Empty array for products - will be populated from database
+const emptyProducts: Product[] = [];
 
 // Distance options
 const distanceOptions = [1, 5, 10, 20, 50];
@@ -124,16 +82,40 @@ const addMatchToChats = (product: Product, offerAmount: number) => {
 export default function NearbyScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const [searchDistance, setSearchDistance] = useState(5); // Default 5 km
+  const [isLoading, setIsLoading] = useState(true);
+  const [searchDistance, setSearchDistance] = useState(1);
+  const [knobWidth, setKnobWidth] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [showDistanceFilter, setShowDistanceFilter] = useState(false);
+  
+  // Track window dimensions for responsive layout
+  const [windowDimensions, setWindowDimensions] = useState({
+    width: typeof window !== 'undefined' ? window.innerWidth : width,
+    height: typeof window !== 'undefined' ? window.innerHeight : height
+  });
+  
+  // Update dimensions when window resizes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const handleResize = () => {
+        setWindowDimensions({
+          width: window.innerWidth,
+          height: window.innerHeight
+        });
+      };
+      
+      window.addEventListener('resize', handleResize);
+      return () => window.removeEventListener('resize', handleResize);
+    }
+  }, []);
+  
   const [offerModalVisible, setOfferModalVisible] = useState(false);
   const [currentProduct, setCurrentProduct] = useState<Product | null>(null);
   const [offerAmount, setOfferAmount] = useState('');
   const [showAnimation, setShowAnimation] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
   const [products, setProducts] = useState<Product[]>([]);
-  const swiperRef = useRef(null);
+  const swiperRef = useRef<Swiper<Product>>(null);
   const animatedValue = useRef(new Animated.Value(0)).current;
-  const sliderWidth = useRef(0);
   const sliderPosition = useRef(new Animated.Value(0)).current;
   
   // Fetch listings based on search distance
@@ -141,8 +123,12 @@ export default function NearbyScreen() {
     if (!user) return;
     
     setIsLoading(true);
+    console.log('Fetching nearby listings...');
+    
     try {
       const distanceToUse = distance !== undefined ? distance : searchDistance;
+      console.log(`Search radius: ${distanceToUse}km`);
+      
       const listings = await getNearbyListings(user.id, distanceToUse);
       
       // Convert Supabase listings to Product format
@@ -151,16 +137,20 @@ export default function NearbyScreen() {
         title: listing.title,
         price: listing.price,
         distance: listing.distance || 0,
+        formattedDistance: listing.formattedDistance || `${(listing.distance || 0).toFixed(1)} km`,
         image: listing.main_image_url || 'https://images.unsplash.com/photo-1627843563095-f6e94676cfe0',
         seller: listing.seller,
-        description: listing.description || ''
+        seller_id: listing.seller_id || '',
+        description: listing.description || '',
+        location: listing.location
       }));
       
+      console.log(`Found ${formattedProducts.length} nearby listings`);
       setProducts(formattedProducts);
     } catch (error) {
       console.error('Error fetching listings:', error);
       // Fallback to sample products if there's an error
-      setProducts(sampleProducts.filter(p => p.distance <= searchDistance));
+      setProducts(emptyProducts.filter(p => p.distance <= searchDistance));
     } finally {
       setIsLoading(false);
     }
@@ -178,80 +168,46 @@ export default function NearbyScreen() {
     sliderPosition.setValue(position);
   }, [searchDistance]);
   
-  // Create pan responder for slider thumb
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => {
-        // Store the current position when the user starts dragging
-        // Using a safer approach with a state variable to track the current value
-        let currentValue = 0;
-        // Create a temporary listener to get the current value
-        const id = sliderPosition.addListener(({ value }) => {
-          currentValue = value;
-          sliderPosition.removeListener(id);
-        });
-        sliderPosition.setOffset(currentValue);
-        sliderPosition.setValue(0);
-      },
-      onPanResponderMove: (_, gestureState) => {
-        // Calculate the new position based on the drag distance
-        const trackWidth = sliderWidth.current;
-        if (trackWidth <= 0) return;
-        
-        // Convert gesture movement to percentage of slider width
-        const newPosition = (gestureState.dx / trackWidth) * 100;
-        
-        // Constrain the position between 0 and 100
-        // Use state variables to track values instead of accessing private properties
-        let currentOffset = 0;
-        let currentValue = 0;
-        
-        // Create a temporary listener to get the current value
-        const id = sliderPosition.addListener(({ value }) => {
-          currentValue = value;
-          sliderPosition.removeListener(id);
-        });
-        
-        // Calculate the constrained position based on the current value and offset
-        const constrainedPosition = Math.max(0, Math.min(100, currentOffset + newPosition));
-        sliderPosition.setValue(constrainedPosition - currentOffset);
-      },
-      onPanResponderRelease: () => {
-        // When the user releases, find the closest distance option
-        sliderPosition.flattenOffset();
-        
-        // Calculate the position as a percentage (0-100)
-        let position = 0;
-        // Create a temporary listener to get the current value
-        const id = sliderPosition.addListener(({ value }) => {
-          position = value;
-          sliderPosition.removeListener(id);
-          
-          // Find the closest distance option
-          const segmentWidth = 100 / (distanceOptions.length - 1);
-          const closestIndex = Math.round(position / segmentWidth);
-          const constrainedIndex = Math.max(0, Math.min(distanceOptions.length - 1, closestIndex));
-          
-          // Update the search distance and animate the slider to the exact position
-          const newDistance = distanceOptions[constrainedIndex];
-          if (newDistance !== searchDistance) {
-            setSearchDistance(newDistance);
-            // Refresh listings when distance changes
-            fetchListings(newDistance);
-          }
-          
-          Animated.timing(sliderPosition, {
-            toValue: constrainedIndex * segmentWidth,
-            duration: 150,
-            useNativeDriver: false,
-          }).start();
-        });
-        // Note: Animation to the exact position is now handled inside the callback above
-      },
-    })
-  ).current;
+  // Slider references and state
+  const sliderWidth = useRef<number>(0);
+  
+  // RadiusSlider component for selecting search distance
+const RadiusSlider = ({ radius, setRadius, onRadiusChange }: { 
+  radius: number; 
+  setRadius: (val: number) => void;
+  onRadiusChange?: () => void;
+}) => {
+  return (
+    <View style={styles.radiusSliderContainer}>
+      <View style={styles.sliderWrapper}>
+        <input
+          type="range"
+          min={1}
+          max={100}
+          step={1}
+          value={radius}
+          onChange={(e) => {
+            const newValue = Number(e.target.value);
+            setRadius(newValue);
+          }}
+          onMouseUp={onRadiusChange}
+          onTouchEnd={onRadiusChange}
+          style={{
+            width: '100%',
+            height: '8px',
+            backgroundColor: '#E5E7EB',
+            borderRadius: '8px',
+            accentColor: '#6C5CE7',
+            cursor: 'pointer',
+            WebkitAppearance: 'none',
+            appearance: 'none',
+          }}
+        />
+      </View>
+      <Text style={styles.radiusValue}>Current radius: {radius} km</Text>
+    </View>
+  );
+};
 
   // Animation for the swoosh effect
   const startAnimation = () => {
@@ -273,7 +229,7 @@ export default function NearbyScreen() {
 
   const handleSwipeRight = (cardIndex: number) => {
     // Use real products if available, otherwise fall back to sample products
-    const productsToUse = products.length > 0 ? products : sampleProducts;
+    const productsToUse = products.length > 0 ? products : emptyProducts;
     const product = productsToUse[cardIndex];
     setCurrentProduct(product);
     setOfferAmount(product.price.toString());
@@ -282,12 +238,25 @@ export default function NearbyScreen() {
 
   const handleSwipeLeft = (cardIndex: number) => {
     // Use real products if available, otherwise fall back to sample products
-    const productsToUse = products.length > 0 ? products : sampleProducts;
+    const productsToUse = products.length > 0 ? products : emptyProducts;
     console.log('Skipped product:', productsToUse[cardIndex].title);
   };
 
+  const handleLike = useCallback(() => {
+    if (!currentProduct) return;
+    
+    console.log(`Liked: ${currentProduct.title}`);
+    
+    // Show the offer modal
+    setOfferModalVisible(true);
+  }, [currentProduct]);
+
   const handleSendOffer = async () => {
-    if (!currentProduct || !user) return;
+    if (!currentProduct || !user) {
+      console.error('Missing currentProduct or user:', { currentProduct, user });
+      Alert.alert('Error', 'Missing product or user information. Please try again.');
+      return;
+    }
     
     const amount = parseFloat(offerAmount);
     if (isNaN(amount) || amount <= 0) {
@@ -302,37 +271,58 @@ export default function NearbyScreen() {
     startAnimation();
     
     try {
+      console.log('🔍 DEBUG - nearby - Creating offer with the following data:');
+      console.log(`Creating offer for ${currentProduct.title}`);
+      console.log('🔍 DEBUG - nearby - Listing ID:', currentProduct.id);
+      console.log('🔍 DEBUG - nearby - Buyer ID:', user.id);
+      console.log('🔍 DEBUG - nearby - Seller ID:', currentProduct.seller_id);
+      console.log('🔍 DEBUG - nearby - Offer Price:', amount);
+      
       // Create a real offer in Supabase
       const offerData = {
         listing_id: currentProduct.id,
         buyer_id: user.id,
-        offer_price: amount, // Using offer_price to match the database schema
-        message: `I'm interested in your ${currentProduct.title}. Would you accept $${amount}?`,
-        status: 'pending'
-        // No need to set created_at, the database will handle it
+        seller_id: currentProduct.seller_id, // Make sure we have the seller ID
+        offer_price: amount,
+        message: offerAmount !== currentProduct.price.toString() ? 
+          `I'm interested in your ${currentProduct.title}. Would you accept $${amount}?` : 
+          `I'm interested in your ${currentProduct.title}.`,
+        status: 'pending',
+        is_test: false // Ensure this is a real offer, not a test one
       };
       
-      await createOffer(offerData);
+      console.log('🔍 DEBUG - nearby - Full offer data:', JSON.stringify(offerData, null, 2));
       
-      // Add the match to chats (keep the local functionality for now)
-      addMatchToChats(currentProduct, amount);
+      console.log('🔍 DEBUG - nearby - Calling createOffer function');
+      console.log(`Sending offer: $${amount}`);
+      const result = await createOffer(offerData);
+      console.log('🔍 DEBUG - nearby - Offer created successfully:', JSON.stringify(result, null, 2));
+      console.log(`Offer sent successfully!`);
       
       // Show a brief notification
       setTimeout(() => {
         Alert.alert(
           'Offer Sent!',
-          `Your offer of $${amount} for ${currentProduct.title} has been sent to ${currentProduct.seller}.\n\nYou have a new match! Check your chats.`
+          `Your offer of $${amount} for ${currentProduct.title} has been sent to the seller. You'll be notified when they respond.`
         );
       }, 1200); // Wait for animation to finish
     } catch (error) {
-      console.error('Error creating offer:', error);
-      Alert.alert('Error', 'Failed to send offer. Please try again.');
+      console.error('🔍 DEBUG - nearby - Error creating offer:', error);
+      console.log(`Error: ${error instanceof Error ? error.message : 'Failed to send offer'}`);
+      console.log('🔍 DEBUG - nearby - Error details:', error instanceof Error ? error.message : String(error));
+      console.log('🔍 DEBUG - nearby - Error stack:', error instanceof Error && error.stack ? error.stack : 'No stack trace');
+      Alert.alert(
+        'Error Creating Offer', 
+        `Failed to send offer: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again.`
+      );
     }
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
+      
+      {/* Debug Overlay removed */}
       
       {/* Swoosh Animation */}
       {showAnimation && (
@@ -365,10 +355,56 @@ export default function NearbyScreen() {
           <Ionicons name="arrow-back" size={24} color="#000" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Nearby</Text>
-        <TouchableOpacity style={styles.headerButton}>
-          <Ionicons name="search" size={24} color="#000" />
+        <TouchableOpacity 
+          style={styles.headerButton}
+          onPress={() => setShowDistanceFilter(prev => !prev)}
+        >
+          <Ionicons name="search-outline" size={24} color="#000" />
         </TouchableOpacity>
       </View>
+      
+      {/* Distance Filter */}
+      {showDistanceFilter && (
+        <View style={styles.filterContainer}>
+          <Text style={styles.filterLabel}>
+            Search Radius: {searchDistance} km
+          </Text>
+          <View style={styles.sliderContainer}>
+            <Text style={styles.sliderLabel}>1</Text>
+            <View 
+              style={styles.sliderTrack}
+              onLayout={(event) => {
+                const { width } = event.nativeEvent.layout;
+                sliderWidth.current = width;
+              }}
+              
+            >
+              {/* Filled Track */}
+              <View style={[styles.sliderFill, { width: `${(searchDistance - 1) / 99 * 100}%` }]} />
+              
+              {/* Distance Markers */}
+              <View style={styles.distanceMarkerContainer}>
+                <View style={[styles.distanceMarker, { left: '0%' }]} />
+                <View style={[styles.distanceMarker, { left: '25%' }]} />
+                <View style={[styles.distanceMarker, { left: '50%' }]} />
+                <View style={[styles.distanceMarker, { left: '75%' }]} />
+                <View style={[styles.distanceMarker, { left: '100%' }]} />
+              </View>
+              
+              {/* Draggable Knob */}
+              <View style={[styles.sliderKnob, { left: `${(searchDistance - 1) / 99 * 100}%` }]}>
+                <View style={styles.sliderKnobInner} />
+              </View>
+            </View>
+            <Text style={styles.sliderLabel}>100</Text>
+          </View>
+          
+          {/* Distance Value Display */}
+          <Text style={styles.distanceValue}>
+            Current radius: {searchDistance} km
+          </Text>
+        </View>
+      )}
       
       {/* Main Content - Product Cards */}
       <View style={styles.cardContainer}>
@@ -386,23 +422,29 @@ export default function NearbyScreen() {
         ) : (
           <Swiper
             ref={swiperRef}
-            cards={products.length > 0 ? products : sampleProducts}
+            cards={products.length > 0 ? products : emptyProducts}
             renderCard={(product) => (
             <View style={styles.card}>
               <Image
                 source={{ uri: product.image }}
                 style={styles.cardImage}
               />
+              {/* Distance badge at the top */}
+              <View style={styles.distanceBadge}>
+                <Ionicons name="location" size={14} color="#fff" />
+                <Text style={styles.distanceText}>
+                  {product.formattedDistance || `${product.distance.toFixed(1)} km`}
+                </Text>
+              </View>
+              
+              {/* Semi-transparent overlay covering the bottom portion */}
               <View style={styles.cardOverlay}>
-                <View style={styles.distanceBadge}>
-                  <Ionicons name="location" size={14} color="#fff" />
-                  <Text style={styles.distanceText}>{product.distance} km</Text>
-                </View>
                 <View style={styles.cardInfo}>
                   <Text style={styles.cardTitle}>{product.title}</Text>
                   <Text style={styles.cardPrice}>${product.price}</Text>
                   <View style={styles.sellerContainer}>
-                    <Text style={styles.sellerText}>Seller: {product.seller}</Text>
+                    <Ionicons name="person-circle-outline" size={16} color="#fff" />
+                    <Text style={styles.sellerText}>{product.seller}</Text>
                   </View>
                 </View>
               </View>
@@ -463,83 +505,11 @@ export default function NearbyScreen() {
       </View>
       
       {/* Distance Slider (below the image) */}
-      <View style={styles.sliderContainer}>
-        <Text style={styles.sliderLabel}>Search Distance: {searchDistance} km</Text>
-        <View 
-          style={styles.sliderTrack}
-          onLayout={(event) => {
-            // Store the width of the slider track for calculations
-            sliderWidth.current = event.nativeEvent.layout.width;
-          }}
-        >
-          {/* Slider markers */}
-          {distanceOptions.map((option, index) => (
-            <TouchableOpacity 
-              key={option}
-              style={[
-                styles.sliderMarker,
-                { left: `${(index / (distanceOptions.length - 1)) * 100}%` }
-              ]}
-              onPress={() => setSearchDistance(option)}
-              hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
-            />
-          ))}
-          
-          {/* Slider fill - animated based on position */}
-          <Animated.View 
-            style={[
-              styles.sliderFill, 
-              { 
-                width: sliderPosition.interpolate({
-                  inputRange: [0, 100],
-                  outputRange: ['0%', '100%'],
-                  extrapolate: 'clamp'
-                })
-              }
-            ]} 
-          />
-          
-          {/* Slider thumb - draggable with pan responder */}
-          <Animated.View 
-            style={[
-              styles.sliderThumb, 
-              { 
-                left: sliderPosition.interpolate({
-                  inputRange: [0, 100],
-                  outputRange: ['0%', '100%'],
-                  extrapolate: 'clamp'
-                })
-              }
-            ]}
-            {...panResponder.panHandlers}
-          />
-        </View>
-        
-        {/* Distance labels */}
-        <View style={styles.sliderLabels}>
-          {distanceOptions.map((option, index) => (
-            <TouchableOpacity
-              key={option}
-              style={[
-                styles.distanceOption,
-                { left: `${(index / (distanceOptions.length - 1)) * 100}%` },
-                searchDistance === option && styles.selectedDistance
-              ]}
-              onPress={() => setSearchDistance(option)}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Text 
-                style={[
-                  styles.distanceOptionText,
-                  searchDistance === option && styles.selectedDistanceText
-                ]}
-              >
-                {option}km
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
+      <RadiusSlider 
+        radius={searchDistance} 
+        setRadius={setSearchDistance}
+        onRadiusChange={() => fetchListings(searchDistance)}
+      />
 
       {/* Offer Modal */}
       <Modal
@@ -590,45 +560,145 @@ export default function NearbyScreen() {
         </View>
       </Modal>
 
-      {/* Bottom Tab Bar */}
-      <View style={styles.tabBar}>
-        <TouchableOpacity 
-          style={[styles.tabItem, styles.activeTab]}
-          onPress={() => router.push('/(app)/nearby')}
-        >
-          <Ionicons name="location" size={24} color="#6C5CE7" />
-          <Text style={[styles.tabText, styles.activeTabText]}>Nearby</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.tabItem}
-          onPress={() => router.push('/(app)/likes')}
-        >
-          <Ionicons name="heart-outline" size={24} color="#8E8E93" />
-          <Text style={styles.tabText}>Likes</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.tabItem}
-          onPress={() => router.push('/(app)/chats')}
-        >
-          <Ionicons name="chatbubble-outline" size={24} color="#8E8E93" />
-          <Text style={styles.tabText}>Chats</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.tabItem}
-          onPress={() => router.push('/(app)/profile')}
-        >
-          <Ionicons name="person-outline" size={24} color="#8E8E93" />
-          <Text style={styles.tabText}>Profile</Text>
-        </TouchableOpacity>
-      </View>
+      {/* Bottom Tab Bar has been moved to the app layout */}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  // RadiusSlider styles
+  radiusSliderContainer: {
+    marginHorizontal: 24,
+    marginVertical: 12,
+    maxWidth: 600,
+    alignSelf: 'center',
+    width: '92%',
+  },
+  sliderWrapper: {
+    width: '100%',
+    marginVertical: 8,
+  },
+  radiusValue: {
+    fontSize: 15,
+    color: '#6C5CE7',
+    textAlign: 'center',
+    marginTop: 8,
+    fontWeight: '500',
+  },
+  // Filter styles
+  filterContainer: {
+    backgroundColor: 'white',
+    padding: 24,
+    marginHorizontal: 16,
+    marginVertical: 16,
+    borderRadius: 16,
+    maxWidth: 600,
+    alignSelf: 'center',
+    width: '92%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  filterLabel: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 16,
+    color: '#333',
+    textAlign: 'center',
+  },
+  sliderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingHorizontal: 8,
+    height: 50,
+  },
+  sliderLabel: {
+    fontSize: 14,
+    color: '#666',
+    width: 30,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  sliderTrack: {
+    flex: 1,
+    height: 8,
+    backgroundColor: '#F0F0F0',
+    borderRadius: 4,
+    position: 'relative',
+    marginHorizontal: 8,
+  },
+  sliderFill: {
+    height: '100%',
+    backgroundColor: '#6C5CE7',
+    borderRadius: 4,
+    position: 'absolute',
+    left: 0,
+    top: 0,
+  },
+  sliderKnob: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'white',
+    position: 'absolute',
+    top: -12,
+    marginLeft: -16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
+    elevation: 6,
+    zIndex: 10,
+    borderWidth: 2,
+    borderColor: '#6C5CE7',
+  },
+  sliderKnobInner: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#6C5CE7',
+  },
+  distanceMarkerContainer: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  distanceMarker: {
+    width: 2,
+    height: 8,
+    backgroundColor: '#CCCCCC',
+    position: 'absolute',
+    top: 0,
+    zIndex: 5,
+  },
+  distanceValue: {
+    fontSize: 18,
+    color: '#6C5CE7',
+    textAlign: 'center',
+    marginTop: 16,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  distanceLabelsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 38,
+    marginTop: 4,
+  },
+  distanceTickLabel: {
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  // Debug overlay styles removed
   swooshAnimation: {
     position: 'absolute',
     top: height / 2 - 50,
@@ -700,18 +770,24 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    maxWidth: 600,
+    alignSelf: 'center',
+    width: '100%',
   },
   card: {
     width: width - 40,
-    height: height * 0.5,
+    height: height * 0.65, // Maintain proper height
+    maxWidth: 500,
+    maxHeight: 600,
     borderRadius: 10,
-    overflow: 'hidden',
     backgroundColor: '#fff',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.3,
     shadowRadius: 4,
-    elevation: 3,
+    elevation: 5,
+    overflow: 'hidden',
+    marginBottom: 60, // Add margin to create space above the slider
   },
   cardImage: {
     width: '100%',
@@ -724,11 +800,16 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     padding: 20,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    paddingBottom: 30, // Add more padding at the bottom
+    height: '40%', // Take up 40% of the card height from the bottom
+    backgroundColor: 'rgba(0,0,0,0.6)', // Darker overlay for better readability
+    // Create a fade effect from bottom to top
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
   },
   distanceBadge: {
     position: 'absolute',
-    top: -30,
+    top: 20,
     right: 20,
     backgroundColor: '#6C5CE7',
     borderRadius: 15,
@@ -736,6 +817,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     flexDirection: 'row',
     alignItems: 'center',
+    zIndex: 10,
   },
   distanceText: {
     color: '#fff',
@@ -744,42 +826,57 @@ const styles = StyleSheet.create({
   },
   cardInfo: {
     marginBottom: 10,
+    width: '100%',
   },
   cardTitle: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#fff',
     marginBottom: 5,
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
   cardPrice: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
     color: '#fff',
     marginBottom: 10,
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
   sellerContainer: {
-    backgroundColor: 'rgba(255,255,255,0.3)',
+    backgroundColor: 'rgba(255,255,255,0.2)',
     paddingHorizontal: 12,
-    paddingVertical: 5,
+    paddingVertical: 6,
     borderRadius: 20,
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 5,
   },
   sellerText: {
     color: '#fff',
     fontSize: 14,
+    marginLeft: 5,
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0.5, height: 0.5 },
+    textShadowRadius: 2,
   },
-  sliderContainer: {
+  // Original slider styles (for another component)
+  distanceSliderContainer: {
     padding: 16,
     marginBottom: 20,
     position: 'relative',
   },
-  sliderLabel: {
+  distanceSliderLabel: {
     fontSize: 16,
     fontWeight: 'bold',
     marginBottom: 12,
     textAlign: 'center',
   },
-  sliderTrack: {
+  distanceSliderTrack: {
     height: 6,
     backgroundColor: '#e0e0e0',
     borderRadius: 3,
@@ -795,7 +892,7 @@ const styles = StyleSheet.create({
     top: -2,
     marginLeft: -1,
   },
-  sliderFill: {
+  distanceSliderFill: {
     height: 6,
     backgroundColor: '#6C5CE7',
     borderRadius: 3,
@@ -848,6 +945,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 20,
     width: '85%',
+    maxWidth: 450,
     maxHeight: '70%',
   },
   modalHeader: {
@@ -918,10 +1016,14 @@ const styles = StyleSheet.create({
   tabBar: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-    paddingVertical: 10,
+    alignItems: 'center',
     backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    paddingVertical: 10,
+    maxWidth: 600,
+    alignSelf: 'center',
+    width: '100%',
   },
   tabItem: {
     alignItems: 'center',

@@ -15,7 +15,9 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase, createListing } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
+import { uploadMultipleImages } from '@/lib/uploadHelpers';
+import { getCurrentLocation, LocationData } from '@/lib/locationService';
 import * as FileSystem from 'expo-file-system';
 
 
@@ -40,7 +42,10 @@ export default function CreateListingScreen() {
   const [category, setCategory] = useState('');
   const [images, setImages] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStatus, setUploadStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [locationStatus, setLocationStatus] = useState<string>('');
 
   const pickImage = async () => {
     if (images.length >= 5) {
@@ -80,125 +85,42 @@ export default function CreateListingScreen() {
 
   const uploadImages = async (): Promise<string[]> => {
     if (images.length === 0) return [];
-    const uploadedUrls: string[] = [];
     
     console.log('Starting image upload process...');
-
-    for (const imageUri of images) {
-      try {
-        const fileExt = imageUri.split('.').pop();
-        const fileName = `${user?.id}-${Date.now()}-${uploadedUrls.length}.${fileExt}`;
-        const filePath = `listings/${fileName}`;
-        const contentType = fileExt === 'png' ? 'image/png' : 'image/jpeg';
-        
-        console.log(`Processing image: ${fileName}`);
-
-        // Get the image as a Blob or Buffer
-        let fileData: Blob | Buffer;
-        if (Platform.OS === 'web') {
-          console.log('Web platform detected, fetching blob...');
-          const response = await fetch(imageUri);
-          if (!response.ok) throw new Error('Failed to fetch image blob on web');
-          fileData = await response.blob();
-        } else {
-          console.log('Native platform detected, reading file as base64...');
-          const base64 = await FileSystem.readAsStringAsync(imageUri, { encoding: FileSystem.EncodingType.Base64 });
-          fileData = Buffer.from(base64, 'base64');
-        }
-
-        console.log('Preparing to upload using fetch API...');
-        
-        // Get the current session for the auth token
-        const { data: sessionData } = await supabase.auth.getSession();
-        if (!sessionData?.session?.access_token) {
-          throw new Error('No authentication token available. Please log in again.');
-        }
-        
-        const accessToken = sessionData.session.access_token;
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://nzkixvdhdvhhwamglszu.supabase.co';
-        const apiUrl = `${supabaseUrl}/storage/v1/object/listings/${fileName}`;
-        
-        console.log('Upload URL:', apiUrl);
-        
-        // Create FormData for the upload
-        const formData = new FormData();
-        
-        // For web, we can use the Blob directly
-        if (Platform.OS === 'web') {
-          // Create a File object from the Blob
-          const file = new File([fileData as Blob], fileName, { type: contentType });
-          formData.append('file', file);
-        } else {
-          // For native, we need to create a Blob from the Buffer
-          const blob = new Blob([fileData as Buffer], { type: contentType });
-          formData.append('file', blob, fileName);
-        }
-        
-        // Add retry logic for upload
-        let retries = 3;
-        let uploadSuccess = false;
-        let uploadError = null;
-        
-        while (retries > 0 && !uploadSuccess) {
-          try {
-            console.log(`Upload attempt ${4-retries}/3...`);
-            
-            // Use fetch to upload the file
-            const uploadResponse = await fetch(apiUrl, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                // Don't set Content-Type header when using FormData
-                // as the browser will set it with the correct boundary
-              },
-              body: formData
-            });
-            
-            if (!uploadResponse.ok) {
-              const errorData = await uploadResponse.json().catch(() => ({}));
-              console.error('Upload response error:', uploadResponse.status, errorData);
-              uploadError = new Error(`Upload failed with status ${uploadResponse.status}: ${JSON.stringify(errorData)}`);
-            } else {
-              console.log('Upload successful!');
-              uploadSuccess = true;
-              break;
-            }
-          } catch (e) {
-            console.error('Exception during upload:', e);
-            uploadError = e;
-          }
-          
-          if (!uploadSuccess && retries > 1) {
-            console.log(`Upload attempt failed, retries left: ${retries-1}`);
-            // Wait before retrying
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          }
-          
-          retries--;
-        }
-        
-        if (!uploadSuccess) {
-          const errorMessage = uploadError instanceof Error 
-            ? uploadError.message 
-            : 'Supabase upload failed after multiple attempts';
-          throw new Error(errorMessage);
-        }
-
-        // Get public URL using the Supabase client
-        console.log('Getting public URL...');
-        const { data } = supabase.storage.from('listings').getPublicUrl(filePath);
-        if (!data || !data.publicUrl) throw new Error('Failed to get public URL for uploaded image.');
-        
-        console.log(`Public URL obtained: ${data.publicUrl}`);
-        uploadedUrls.push(data.publicUrl);
-      } catch (error) {
-        console.error('Error uploading image:', error);
-        throw error instanceof Error ? error : new Error(String(error));
-      }
-    }
+    setUploadStatus('Preparing images for upload...');
+    setUploadProgress(0);
     
-    console.log(`Upload complete. Total images uploaded: ${uploadedUrls.length}`);
-    return uploadedUrls;
+    try {
+      // Set up progress callback for tracking uploads
+      const onProgress = (progress: number, currentIndex: number, total: number) => {
+        // Calculate overall progress considering all images
+        // Each image contributes its percentage divided by total images
+        const baseProgress = (currentIndex / total) * 100;
+        const currentItemContribution = (progress / 100) * (100 / total);
+        const overallProgress = Math.round(baseProgress + currentItemContribution);
+        
+        setUploadProgress(overallProgress);
+        setUploadStatus(`Uploading image ${currentIndex + 1} of ${total}: ${Math.round(progress)}%`);
+      };
+      
+      // Use the uploadMultipleImages function with all images at once
+      // This is more efficient and allows for better progress tracking
+      const uploadedUrls = await uploadMultipleImages(
+        images,
+        'listings',
+        user?.id || 'anonymous',
+        onProgress
+      );
+      
+      setUploadStatus('Upload complete!');
+      setUploadProgress(100);
+      console.log(`Upload complete. Total images uploaded: ${uploadedUrls.length}`);
+      return uploadedUrls;
+    } catch (error) {
+      setUploadStatus(`Upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error('Error uploading images:', error);
+      throw error instanceof Error ? error : new Error(String(error));
+    }
   };
 
   const handleSubmit = async () => {
@@ -223,12 +145,12 @@ export default function CreateListingScreen() {
       return;
     }
     
-    // Temporarily bypassing the image requirement
-    // if (images.length === 0) {
-    //   setError('Please add at least one image');
-    //   return;
-    // }
-    console.log('Image requirement bypassed temporarily');
+    // Require at least one image for the listing
+    if (images.length === 0) {
+      setError('Please add at least one image');
+      return;
+    }
+    console.log('Validating image requirement...');
 
     // Verify user is authenticated
     if (!user?.id) {
@@ -238,19 +160,59 @@ export default function CreateListingScreen() {
 
     setIsLoading(true);
     setError(null);
+    setUploadStatus('Initializing...');
+    setUploadProgress(0);
+    setLocationStatus('Getting your location...');
     
     try {
       console.log('Starting listing creation process...');
       
-      // Bypass image upload process for now
-      console.log('Bypassing image upload process...');
-      // Use an empty array for images
-      const imageUrls: string[] = [];
+      // Upload images to Supabase storage
+      console.log('Starting image upload process...');
+      let imageUrls: string[] = [];
       
-      // If you want to use a default placeholder image instead, uncomment this:
-      // const imageUrls = ['https://via.placeholder.com/300x300?text=No+Image'];
+      try {
+        // Call the uploadImages function to handle the upload process
+        imageUrls = await uploadImages();
+        console.log(`Successfully uploaded ${imageUrls.length} images:`, imageUrls);
+        setUploadStatus('Creating listing...');
+      } catch (uploadError) {
+        console.error('Error uploading images:', uploadError);
+        setError('Failed to upload images. Please try again.');
+        setUploadStatus('Upload failed');
+        setIsLoading(false);
+        return;
+      }
       
-      console.log('Using default image configuration:', imageUrls);
+      // Get user's current location
+      setLocationStatus('Getting your location...');
+      let locationData: LocationData | null = null;
+      
+      try {
+        locationData = await getCurrentLocation();
+        if (!locationData) {
+          console.log('Location not available, using default');
+          setLocationStatus('Location not available, using default');
+          // Use default location if user's location is not available
+          locationData = {
+            latitude: 48.8566, // Default to Paris coordinates
+            longitude: 2.3522,
+            address: 'Paris, France'
+          };
+        } else {
+          console.log('Got user location:', locationData);
+          setLocationStatus('Location acquired successfully');
+        }
+      } catch (locationError) {
+        console.error('Error getting location:', locationError);
+        setLocationStatus('Failed to get location, using default');
+        // Use default location on error
+        locationData = {
+          latitude: 48.8566,
+          longitude: 2.3522,
+          address: 'Paris, France'
+        };
+      }
       
       // Create listing data object
       const listingData = {
@@ -263,11 +225,7 @@ export default function CreateListingScreen() {
         images: imageUrls, // Store as array (jsonb)
         status: 'active',
         // Add location data for distance-based search
-        location: {
-          latitude: 48.8566, // Default to Paris coordinates for demo
-          longitude: 2.3522,
-          address: 'Paris, France'
-        }
+        location: locationData
       };
       
       console.log('Prepared listing data:', JSON.stringify(listingData));
@@ -394,6 +352,25 @@ export default function CreateListingScreen() {
           </View>
 
           {error && <Text style={styles.errorText}>{error}</Text>}
+          
+          {/* Upload Progress Indicator */}
+          {isLoading && (
+            <View style={styles.progressContainer}>
+              <View style={styles.progressHeader}>
+                <Text style={styles.progressTitle}>Upload Progress</Text>
+                <Text style={styles.progressPercentage}>{uploadProgress}%</Text>
+              </View>
+              <View style={styles.progressBarContainer}>
+                <View 
+                  style={[styles.progressBar, { width: `${uploadProgress}%` }]} 
+                />
+              </View>
+              <Text style={styles.progressText}>{uploadStatus}</Text>
+              {locationStatus ? (
+                <Text style={styles.locationStatus}>{locationStatus}</Text>
+              ) : null}
+            </View>
+          )}
 
           <TouchableOpacity 
             style={[styles.submitButton, isLoading && styles.submitButtonDisabled]} 
@@ -530,7 +507,55 @@ const styles = StyleSheet.create({
   },
   submitButtonText: {
     color: 'white',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
+  },
+  progressContainer: {
+    marginVertical: 15,
+    width: '100%',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  progressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  progressTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  progressBarContainer: {
+    height: 8,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  progressBar: {
+    height: '100%',
+    backgroundColor: '#6C5CE7',
+    borderRadius: 4,
+  },
+  progressText: {
+    fontSize: 14,
+    color: '#555',
+    marginBottom: 4,
+  },
+  progressPercentage: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#6C5CE7',
+  },
+  locationStatus: {
+    fontSize: 14,
+    color: '#555',
+    marginTop: 4,
+    fontStyle: 'italic',
   },
 });

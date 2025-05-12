@@ -51,6 +51,21 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, [user]);
   
   // Handle match notifications
+  // Track if the component is mounted to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+  
+  // Setup cleanup on unmount
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      // Clear any global state when the context is unmounted
+      if (typeof window !== 'undefined') {
+        (window as any).hasNewMatches = false;
+        (window as any).globalChatMatches = [];
+      }
+    };
+  }, []);
+  
   useEffect(() => {
     // Prevent re-initialization on rerenders with saved state
     if (isInitializedRef.current) {
@@ -58,6 +73,12 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
     
     isInitializedRef.current = true;
+    
+    // Reset state on fresh initialization
+    if (isMountedRef.current) {
+      setNewMatchCount(0);
+      setShowMatchPopup(false);
+    }
     
     // Direct handler for newMatch custom events
     const handleNewMatch = (event: CustomEvent) => {
@@ -131,17 +152,56 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         intervalRef.current = setInterval(checkGlobalMatches, 2000);
       }
       
+      // Listen for browser navigation events (back/forward buttons)
+      const handleNavigation = () => {
+        if (isMountedRef.current) {
+          console.log('NotificationContext: Detected navigation event, cleaning up');
+          // Clear interval and reset state
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+          }
+          // Reset any global flags that might cause issues
+          if (typeof window !== 'undefined') {
+            (window as any).hasNewMatches = false;
+          }
+        }
+      };
+      
+      // Add listeners for browser navigation
+      if (typeof window !== 'undefined') {
+        window.addEventListener('popstate', handleNavigation);
+      }
+      
       return () => {
         if (intervalRef.current) {
           clearInterval(intervalRef.current);
           intervalRef.current = null;
         }
-        window.removeEventListener('newMatch', handleNewMatch as EventListener);
-        isInitializedRef.current = false;
+        if (typeof window !== 'undefined') {
+          window.removeEventListener('newMatch', handleNewMatch as EventListener);
+          window.removeEventListener('popstate', handleNavigation);
+        }
+        // Don't reset isInitializedRef on cleanup for certain cases
+        // but do reset it on browser navigation events
       };
     }
   }, [user]);
 
+  // Reset the initialization flag when the user changes
+  // This ensures we properly handle user changes and login/logout
+  useEffect(() => {
+    // Only reset if we have a user change (login/logout)
+    if (user) {
+      console.log('NotificationContext: User changed, ensuring fresh state');
+      // Reset any stored matches when user changes
+      if (typeof window !== 'undefined') {
+        (window as any).hasNewMatches = false;
+        (window as any).globalChatMatches = [];
+      }
+    }
+  }, [user?.id]);
+  
   return (
     <NotificationContext.Provider
       value={{

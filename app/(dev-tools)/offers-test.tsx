@@ -6,6 +6,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
+import eventBus from '../../utils/eventBus';
+import { useRouter } from 'expo-router';
 import Animated, { 
   useSharedValue, useAnimatedStyle, withSpring, 
   runOnJS, useAnimatedGestureHandler 
@@ -67,6 +69,10 @@ interface ChatMessage {
 }
 
 export default function OffersTest() {
+  console.log("🔍 Component loaded");
+  // Initialize router for navigation
+  const router = useRouter();
+  
   // State for current user role
   const [currentUserId, setCurrentUserId] = useState<string>(BUYER_UUID);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -216,6 +222,8 @@ export default function OffersTest() {
     
     initData();
   }, [currentUserId]);
+
+  // Function declaration moved to line ~490
 
   // Function to refresh all data
   const refreshData = async () => {
@@ -375,6 +383,10 @@ export default function OffersTest() {
             .eq('seller_id', SELLER_UUID)
             .eq('status', 'pending');
             
+          // Debug log with current auth user and offers data
+          console.log('DEBUG - Current auth user ID:', currentUserId);
+          console.log('DEBUG - Offers query response:', { data, error });
+            
           if (error) throw error;
           
           // Filter offers that are likely test offers (created by our test users)
@@ -392,6 +404,10 @@ export default function OffersTest() {
             .select('*')
             .eq('seller_id', SELLER_UUID)
             .eq('status', 'pending');
+            
+          // Debug log with current auth user and offers data (simple query)
+          console.log('DEBUG - Current auth user ID (simple query):', currentUserId);
+          console.log('DEBUG - Simple offers query response:', { data, error });
             
           if (error) throw error;
           
@@ -430,6 +446,10 @@ export default function OffersTest() {
         .eq('is_active', true)
         .or(`buyer_id.eq.${BUYER_UUID},seller_id.eq.${SELLER_UUID}`)
         .order('last_message_at', { ascending: false });
+      
+      // Debug log with current auth user and chats data
+      console.log('DEBUG - Current auth user ID (chats):', currentUserId);
+      console.log('DEBUG - Chats query response:', { data, error });
         
       if (error) throw error;
       
@@ -452,6 +472,40 @@ export default function OffersTest() {
       logDebug(`Error fetching active chats: ${error.message}`);
       setActiveChats([]);
     }
+  };
+
+  // Function to test toast notification using EventBus
+  const testToastNotification = () => {
+    logDebug('Testing toast notification via EventBus...');
+    
+    // Set the current user ID in the window object for testing
+    if (typeof window !== 'undefined') {
+      (window as any).currentUser = { id: currentUserId };
+      logDebug(`Current user ID set to: ${currentUserId}`);
+      
+      // Emit a test toast event
+      eventBus.emit('showToast', {
+        message: 'Test toast notification via EventBus',
+        type: 'success',
+        buyerId: currentUserId
+      });
+      
+      // Also try direct window event for redundancy
+      try {
+        const directEvent = new CustomEvent('direct-toast', {
+          detail: {
+            message: 'Test toast notification via direct event',
+            type: 'success',
+            buyerId: currentUserId
+          }
+        });
+        window.dispatchEvent(directEvent);
+      } catch (e) {
+        console.error('Error dispatching direct event:', e);
+      }
+    }
+    
+    logDebug('Toast events emitted. Check if they appear on screen.');
   };
 
   // Function to clear test data
@@ -533,17 +587,16 @@ export default function OffersTest() {
         logDebug(`Deleted ${listingIds.length} test listings`);
       }
       
-      // Note: We're not deleting the test profiles because they're needed for the dev tools to work
-      // If you want to delete them, uncomment the following code:
+      // Note: We're not deleting the test users because they're needed for the dev tools to work
       /*
-      // Delete test profiles
-      const { error: profilesDeleteError } = await supabase
-        .from('profiles')
+      // Delete test users
+      const { error: usersDeleteError } = await supabase
+        .from('users')
         .delete()
         .in('id', [BUYER_UUID, SELLER_UUID]);
         
-      if (profilesDeleteError) throw profilesDeleteError;
-      logDebug('Deleted test profiles');
+      if (usersDeleteError) throw usersDeleteError;
+      logDebug('Deleted test users');
       */
       
       logDebug('Test data cleared successfully');
@@ -559,20 +612,22 @@ export default function OffersTest() {
     }
   };
 
+  // Handle back navigation
+  const handleBackNavigation = () => {
+    console.log('🔍 DEBUG - Handling back navigation');
+    router.push('/');
+  };
+
   // Custom dropdown component for user selection
   const renderUserSelection = () => {
     return (
       <View style={styles.userSelectionContainer}>
-        <Text style={styles.sectionTitle}>👥 Auth Simulation</Text>
-        <View style={styles.pickerContainer}>
-          <Text style={styles.pickerLabel}>Current User:</Text>
+        <View style={styles.header}>
           <TouchableOpacity 
-            style={styles.dropdownButton} 
-            onPress={() => setShowUserDropdown(!showUserDropdown)}
+            style={styles.backButton}
+            onPress={handleBackNavigation}
           >
-            <Text style={styles.dropdownButtonText}>
-              {currentUserId === BUYER_UUID ? 'Test Buyer' : 'Test Seller'}
-            </Text>
+            <Text style={styles.backButtonText}>← Back</Text>
           </TouchableOpacity>
           
           {showUserDropdown && (
@@ -602,11 +657,12 @@ export default function OffersTest() {
             </View>
           )}
         </View>
-        <Pressable 
-          style={styles.clearButton}
-          onPress={clearTestData}
-        >
+        <Pressable onPress={clearTestData} style={styles.clearButton}>
           <Text style={styles.clearButtonText}>🧹 Clear Test Data</Text>
+        </Pressable>
+        
+        <Pressable onPress={testToastNotification} style={[styles.clearButton, { backgroundColor: '#6C5CE7' }]}>
+          <Text style={styles.clearButtonText}>🔔 Test Toast Notification</Text>
         </Pressable>
       </View>
     );
@@ -1169,6 +1225,23 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    padding: 16,
+  },
+  backButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#6C5CE7',
+    borderRadius: 8,
+    marginBottom: 10,
+  },
+  backButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
   },
   userSelectionContainer: {
     padding: 16,

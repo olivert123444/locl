@@ -97,10 +97,10 @@ export default function EncountersScreen() {
         
         <TouchableOpacity 
           style={styles.tabItem}
-          onPress={() => router.push('/(app)/swipe')}
+          onPress={() => router.push('/(app)/archive')}
         >
-          <Ionicons name="heart-outline" size={24} color="#8E8E93" />
-          <Text style={styles.tabText}>Likes</Text>
+          <Ionicons name="archive-outline" size={24} color="#8E8E93" />
+          <Text style={styles.tabText}>Archive</Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
