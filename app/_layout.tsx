@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 import React, { useState, useEffect, useRef } from 'react';
 import { View, ActivityIndicator } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { NotificationProvider } from '@/context/NotificationContext';
 import MatchToast from '@/components/MatchToast';
@@ -30,10 +31,12 @@ export default function RootLayout() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <AuthProvider>
         <NotificationProvider>
-          <RootLayoutNav />
-          <MatchToast />
-          <DebugOverlay />
-          <StatusBar style="auto" />
+          <GestureHandlerRootView style={{ flex: 1 }}>
+            <RootLayoutNav />
+            <MatchToast />
+            <DebugOverlay />
+            <StatusBar style="auto" />
+          </GestureHandlerRootView>
         </NotificationProvider>
       </AuthProvider>
     </ThemeProvider>
