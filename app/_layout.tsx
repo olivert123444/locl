@@ -264,8 +264,8 @@ function RootLayoutNav() {
     } else if (user && isOnboarded === true) {
       // Redirect to main app if coming from auth or onboarding
       if (currentPath.startsWith('(auth)') || currentPath.startsWith('(onboarding)')) {
-        log.info('User is onboarded, redirecting to main app');
-        router.replace('/(tabs)/nearby'); // Main screen route
+        log.info('User is onboarded, redirecting to main app group: /(app)');
+        router.replace('/(app)'); // Navigate to the (app) group's layout
       }
     }
   }, [user, loading, isOnboarded, isInitialized, segments]);
