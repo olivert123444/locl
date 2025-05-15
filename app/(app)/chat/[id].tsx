@@ -19,6 +19,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { respondToOffer } from '@/lib/supabase';
+import BottomTabBar from '@/components/BottomTabBar';
 
 type Message = {
   id: string;

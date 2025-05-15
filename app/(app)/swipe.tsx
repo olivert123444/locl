@@ -26,7 +26,7 @@ const sampleProfile = {
 
 export default function SwipeScreen() {
   const router = useRouter();
-  const [currentTab, setCurrentTab] = useState('likes');
+  const [currentTab, setCurrentTab] = useState('archive');
 
   return (
     <SafeAreaView style={styles.container}>
@@ -117,19 +117,19 @@ export default function SwipeScreen() {
         <TouchableOpacity 
           style={styles.tabItem}
           onPress={() => {
-            setCurrentTab('likes');
-            router.push('/(app)/swipe');
+            setCurrentTab('archive');
+            router.push('/(app)/archive');
           }}
         >
           <Ionicons 
-            name={currentTab === 'likes' ? "heart" : "heart-outline"} 
+            name={currentTab === 'archive' ? "archive" : "archive-outline"} 
             size={24} 
-            color={currentTab === 'likes' ? "#6C5CE7" : "#8E8E93"} 
+            color={currentTab === 'archive' ? "#6C5CE7" : "#8E8E93"} 
           />
           <Text style={[
             styles.tabText, 
-            currentTab === 'likes' && styles.activeTabText
-          ]}>Likes</Text>
+            currentTab === 'archive' && styles.activeTabText
+          ]}>Archive</Text>
         </TouchableOpacity>
         
         <TouchableOpacity 

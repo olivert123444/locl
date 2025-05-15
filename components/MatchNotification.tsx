@@ -64,7 +64,7 @@ const MatchNotification = () => {
     >
       <View style={styles.content}>
         <Ionicons name="checkmark-circle" size={24} color="white" />
-        <Text style={styles.text}>You have a new match!</Text>
+        <Text style={styles.text}>🎉 You have a match! Start chatting now.</Text>
         <View style={styles.imageContainer}>
           <Image 
             source={{ 

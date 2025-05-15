@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 export default function SignupScreen() {
   const { signUpWithEmail } = useAuth();
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -97,6 +98,20 @@ export default function SignupScreen() {
           </View>
           
           <View style={styles.form}>
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Full Name</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter your full name"
+                value={fullName}
+                onChangeText={(text) => {
+                  setFullName(text);
+                  setError(null);
+                }}
+                autoCapitalize="words"
+              />
+            </View>
+            
             <View style={styles.inputContainer}>
               <Text style={styles.label}>Email</Text>
               <TextInput

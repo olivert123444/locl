@@ -2,12 +2,214 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Switch, ActivityIndicator, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
+import { supabase, uploadUserAvatar, updateUserProfile as updateUserProfileDirect } from '@/lib/supabase';
 import * as ImagePicker from 'expo-image-picker';
+import { addDebugLog } from '@/components/DebugOverlay';
 
-export default function ProfileSetup() {
+// Debug logger for profile setup
+const log = {
+  info: (message: string, data?: any) => {
+    if (data) {
+      console.log(`[PROFILE] 🔵 ${message}`, data);
+      addDebugLog('info', `[PROFILE] ${message}`, data);
+    } else {
+      console.log(`[PROFILE] 🔵 ${message}`);
+      addDebugLog('info', `[PROFILE] ${message}`);
+    }
+  },
+  success: (message: string, data?: any) => {
+    if (data) {
+      console.log(`[PROFILE] ✅ ${message}`, data);
+      addDebugLog('success', `[PROFILE] ${message}`, data);
+    } else {
+      console.log(`[PROFILE] ✅ ${message}`);
+      addDebugLog('success', `[PROFILE] ${message}`);
+    }
+  },
+  warn: (message: string, data?: any) => {
+    if (data) {
+      console.warn(`[PROFILE] ⚠️ ${message}`, data);
+      addDebugLog('warn', `[PROFILE] ${message}`, data);
+    } else {
+      console.warn(`[PROFILE] ⚠️ ${message}`);
+      addDebugLog('warn', `[PROFILE] ${message}`);
+    }
+  },
+  error: (message: string, error?: any) => {
+    if (error) {
+      console.error(`[PROFILE] ❌ ${message}`, error);
+      addDebugLog('error', `[PROFILE] ${message}`, error);
+    } else {
+      console.error(`[PROFILE] ❌ ${message}`);
+      addDebugLog('error', `[PROFILE] ${message}`);
+    }
+  }
+};
+
+// Diagnostic Tests Function
+const runDiagnosticTests = async (user: any, log: any) => {
+  if (!user || !user.id) {
+    log.error('DIAGNOSTIC: No user available for testing');
+    return;
+  }
+  
+  const userId = user.id;
+  log.info('DIAGNOSTIC: Starting tests for user', { userId });
+  
+  // Test 1: Basic read test - Can we read the current user profile?
+  try {
+    log.info('DIAGNOSTIC TEST 1: Reading user profile');
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .single();
+      
+    if (userError) {
+      log.error('DIAGNOSTIC TEST 1 FAILED: Cannot read user profile', userError);
+    } else if (userData) {
+      log.success('DIAGNOSTIC TEST 1 PASSED: User profile read successfully', {
+        id: userData.id,
+        email: userData.email,
+        fullName: userData.full_name,
+        name: userData.name,
+        isOnboarded: userData.is_onboarded,
+        isSeller: userData.is_seller,
+        isBuyer: userData.is_buyer,
+        hasAvatar: !!userData.avatar_url,
+        hasBio: !!userData.bio
+      });
+    }
+  } catch (e) {
+    log.error('DIAGNOSTIC TEST 1 ERROR:', e);
+  }
+  
+  // Test 2: Update name only 
+  try {
+    log.info('DIAGNOSTIC TEST 2: Updating only full_name');
+    const testName = `Test Name ${new Date().getTime().toString().slice(-4)}`;
+    const { data: nameData, error: nameError } = await supabase
+      .from('users')
+      .update({ full_name: testName })
+      .eq('id', userId)
+      .select('*')
+      .single();
+      
+    if (nameError) {
+      log.error('DIAGNOSTIC TEST 2 FAILED: Cannot update name', nameError);
+    } else if (nameData) {
+      log.success('DIAGNOSTIC TEST 2 PASSED: Name updated successfully', {
+        newName: nameData.full_name,
+        originalName: nameData.name
+      });
+    }
+  } catch (e) {
+    log.error('DIAGNOSTIC TEST 2 ERROR:', e);
+  }
+  
+  // Test 3: Update boolean fields with different formats
+  try {
+    log.info('DIAGNOSTIC TEST 3: Testing boolean field formats');
+    const testData = {
+      is_seller: true,       // Boolean true
+      is_buyer: true,        // Boolean true
+      is_onboarded: true     // Boolean true
+    };
+    
+    const { data: boolData, error: boolError } = await supabase
+      .from('users')
+      .update(testData)
+      .eq('id', userId)
+      .select('*')
+      .single();
+      
+    if (boolError) {
+      log.error('DIAGNOSTIC TEST 3 FAILED: Cannot update boolean fields', boolError);
+    } else if (boolData) {
+      log.success('DIAGNOSTIC TEST 3 PASSED: Boolean fields updated successfully', {
+        isSeller: boolData.is_seller,
+        sellerType: typeof boolData.is_seller,
+        isBuyer: boolData.is_buyer,
+        buyerType: typeof boolData.is_buyer,
+        isOnboarded: boolData.is_onboarded,
+        onboardedType: typeof boolData.is_onboarded
+      });
+    }
+  } catch (e) {
+    log.error('DIAGNOSTIC TEST 3 ERROR:', e);
+  }
+  
+  // Test 4: Update all profile fields at once
+  try {
+    log.info('DIAGNOSTIC TEST 4: Comprehensive profile update');
+    const timestamp = new Date().getTime().toString().slice(-4);
+    const fullTestData = {
+      full_name: `Full Test ${timestamp}`,
+      bio: `Test bio ${timestamp}`,
+      is_seller: true,
+      is_buyer: true,
+      is_onboarded: true,
+      updated_at: new Date().toISOString()
+    };
+    
+    const { data: fullData, error: fullError } = await supabase
+      .from('users')
+      .update(fullTestData)
+      .eq('id', userId)
+      .select('*')
+      .single();
+      
+    if (fullError) {
+      log.error('DIAGNOSTIC TEST 4 FAILED: Cannot update all profile fields', fullError);
+    } else if (fullData) {
+      log.success('DIAGNOSTIC TEST 4 PASSED: All profile fields updated successfully', {
+        fullName: fullData.full_name,
+        bio: fullData.bio ? fullData.bio.substring(0, 20) + '...' : null,
+        isSeller: fullData.is_seller,
+        isBuyer: fullData.is_buyer,
+        isOnboarded: fullData.is_onboarded
+      });
+    }
+  } catch (e) {
+    log.error('DIAGNOSTIC TEST 4 ERROR:', e);
+  }
+  
+  // Test 5: Update full_name and name simultaneously
+  try {
+    log.info('DIAGNOSTIC TEST 5: Testing name field confusion');
+    const timestamp = new Date().getTime().toString().slice(-4);
+    const nameTestData = {
+      full_name: `Full Name ${timestamp}`,
+      name: `Name ${timestamp}`
+    };
+    
+    const { data: nameData, error: nameError } = await supabase
+      .from('users')
+      .update(nameTestData)
+      .eq('id', userId)
+      .select('*')
+      .single();
+      
+    if (nameError) {
+      log.error('DIAGNOSTIC TEST 5 FAILED: Cannot update both name fields', nameError);
+    } else if (nameData) {
+      log.success('DIAGNOSTIC TEST 5 PASSED: Both name fields updated successfully', {
+        fullName: nameData.full_name,
+        name: nameData.name,
+        // Which one actually shows in the UI?
+        effectiveName: nameData.full_name || nameData.name
+      });
+    }
+  } catch (e) {
+    log.error('DIAGNOSTIC TEST 5 ERROR:', e);
+  }
+  
+  log.info('DIAGNOSTIC: All tests completed');
+};
+
+export default function ProfileScreen() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, updateUserProfile, fetchCurrentUser } = useAuth();
   const [name, setName] = useState('');
   const [bio, setBio] = useState('');
   const [isSeller, setIsSeller] = useState(true);
@@ -15,16 +217,24 @@ export default function ProfileSetup() {
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  
+  // Log component mount
+  React.useEffect(() => {
+    log.info('Profile setup screen mounted', { userId: user?.id });
+  }, []);
 
   const pickImage = async () => {
     try {
+      log.info('Requesting media library permissions');
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       
       if (status !== 'granted') {
+        log.warn('Media library permissions denied');
         setErrorMsg('We need camera roll permissions to set your profile picture');
         return;
       }
-
+      
+      log.info('Opening image picker');
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
@@ -33,175 +243,177 @@ export default function ProfileSetup() {
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
+        log.success('Image selected successfully');
         setProfileImage(result.assets[0].uri);
+      } else {
+        log.info('Image selection canceled');
       }
     } catch (error) {
-      console.error('Error picking image:', error);
+      log.error('Error picking image', error);
       setErrorMsg('Failed to select image. Please try again.');
     }
   };
 
   const uploadProfileImage = async (): Promise<string | null> => {
-    if (!profileImage) return null;
+    if (!profileImage) {
+      log.info('No profile image to upload');
+      return null;
+    }
     
     try {
-      const fileExt = profileImage.split('.').pop();
-      const fileName = `${user?.id}-${Date.now()}.${fileExt}`;
-      const filePath = `profiles/${fileName}`;
+      log.info('Starting profile image upload using uploadUserAvatar');
       
-      // Convert image to blob
-      const response = await fetch(profileImage);
-      const blob = await response.blob();
+      if (!user) {
+        log.error('Cannot upload image - user not authenticated');
+        throw new Error('User not authenticated');
+      }
       
-      // Upload to Supabase Storage
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(filePath, blob);
-        
-      if (uploadError) throw uploadError;
+      // Log image details (size, format, etc.)
+      log.info('Image details', { 
+        userId: user.id,
+        imageUri: profileImage.substring(0, 50) + '...' // Only log part of the URI for privacy
+      });
       
-      // Get public URL
-      const { data } = supabase.storage
-        .from('avatars')
-        .getPublicUrl(filePath);
-        
-      return data.publicUrl;
+      // Use the improved uploadUserAvatar function from supabase.ts
+      // This function now properly handles base64 data URLs
+      const avatarUrl = await uploadUserAvatar(user.id, profileImage);
+      
+      if (avatarUrl) {
+        log.success('Profile image upload completed', { avatarUrl });
+      } else {
+        log.warn('Profile image upload completed but no URL returned');
+      }
+      
+      return avatarUrl;
     } catch (error) {
-      console.error('Error uploading image:', error);
-      setErrorMsg('Failed to upload profile image. Your profile will be saved without an image.');
-      return null;
+      log.error('Error uploading profile image', error);
+      log.info('Continuing profile setup without image');
+      return null; // Continue without image
     }
   };
 
-  const handleContinue = async () => {
+  const handleSubmit = async () => {
+    console.log('SUBMIT BUTTON PRESSED - handleSubmit function called');
+    log.info('Profile submission initiated');
+    
+    // Validate form data
     if (!name) {
+      log.warn('Submission validation failed: No name provided');
       setErrorMsg('Please enter your name');
       return;
     }
 
+    if (isLoading) {
+      log.warn('Submission already in progress');
+      return;
+    }
+    
     setIsLoading(true);
+    setErrorMsg(null);
+    
     try {
+      // Check if we have a user
       if (!user) {
-        throw new Error('User not authenticated');
-      }
-
-      // Upload profile image if selected
-      const avatarUrl = profileImage ? await uploadProfileImage() : null;
-      
-      // First get the existing user to preserve other fields
-      const { data: existingUser, error: fetchError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-
-      if (fetchError && fetchError.code !== 'PGRST116') {
-        console.error('Error fetching user:', fetchError);
-        throw fetchError;
-      }
-
-      // Define interface for user data
-      interface UserUpdateData {
-        id: string;
-        full_name: string;
-        bio: string;
-        is_seller: boolean;
-        is_buyer: boolean;
-        updated_at: string;
-        avatar_url?: string | null;
-        email?: string;
-        created_at?: string;
-        location?: any; // Using any for the JSONB field
+        log.error('Cannot create profile: No authenticated user');
+        setErrorMsg('Authentication error. Please sign out and try again.');
+        setIsLoading(false);
+        return;
       }
       
-      // Prepare update data
-      const updateData: UserUpdateData = {
-        id: user.id,
-        full_name: name,
-        bio: bio,
+      console.log('DIRECT UPDATE: Starting profile update with user ID:', user.id);
+      
+      // Step 1: Prepare profile update data
+      const profileUpdateData = {
+        full_name: name.trim(),
+        bio: bio ? bio.trim() : null,
         is_seller: isSeller,
         is_buyer: isBuyer,
-        updated_at: new Date().toISOString(),
+        is_onboarded: true,
+        updated_at: new Date().toISOString()
       };
-
-      // Only update avatar if a new one was uploaded
+      
+      console.log('DIRECT UPDATE: Profile data prepared', profileUpdateData);
+      
+      // Step 2: Upload image if exists
+      let avatarUrl = null;
+      if (profileImage) {
+        try {
+          console.log('DIRECT UPDATE: Uploading profile image');
+          avatarUrl = await uploadUserAvatar(user.id, profileImage);
+          console.log('DIRECT UPDATE: Avatar uploaded successfully:', avatarUrl);
+        } catch (imageError) {
+          console.error('DIRECT UPDATE: Image upload failed:', imageError);
+        }
+      }
+      
+      // Step 3: Direct database update
+      console.log('DIRECT UPDATE: Performing direct database update');
+      
+      // Explicitly specify only the fields we want to update
+      // instead of using spread operator which might include unwanted fields
+      // Use proper typing to allow for optional fields
+      const updateObject: {
+        full_name: string;
+        bio: string | null;
+        is_seller: boolean;
+        is_buyer: boolean;
+        is_onboarded: boolean;
+        updated_at: string;
+        avatar_url?: string; // Make avatar_url optional
+      } = {
+        full_name: name.trim(),
+        bio: bio ? bio.trim() : null,
+        is_seller: isSeller,
+        is_buyer: isBuyer,
+        is_onboarded: true,
+        updated_at: new Date().toISOString()
+      };
+      
+      // Only add avatar_url if we have one
       if (avatarUrl) {
-        updateData.avatar_url = avatarUrl;
-      }
-
-      // If user doesn't exist (which shouldn't happen at this point), add required fields
-      if (!existingUser) {
-        updateData.email = user.email || '';
-        updateData.created_at = new Date().toISOString();
-        // Create an empty location object if it doesn't exist
-        updateData.location = {
-          city: '',
-          zip_code: '',
-          country: 'US'
-        };
+        updateObject.avatar_url = avatarUrl;
       }
       
-      console.log('Updating user profile with data:', updateData);
+      console.log('DIRECT UPDATE: Final update object:', updateObject);
       
-      console.log('Attempting to save profile with data:', updateData);
+      const { data: updateResult, error: updateError } = await supabase
+        .from('users')
+        .update(updateObject)
+        .eq('id', user.id)
+        .select()
+        .single();
       
-      // Try to update first (most likely scenario)
-      let result;
-      if (existingUser) {
-        console.log('Updating existing user record');
-        result = await supabase
-          .from('users')
-          .update({
-            full_name: name,
-            bio: bio,
-            is_seller: isSeller,
-            is_buyer: isBuyer,
-            updated_at: new Date().toISOString(),
-            ...(avatarUrl ? { avatar_url: avatarUrl } : {})
-          })
-          .eq('id', user.id);
-      } else {
-        // Insert if user doesn't exist yet
-        console.log('Creating new user record');
-        result = await supabase
-          .from('users')
-          .insert({
-            id: user.id,
-            email: user.email || '',
-            full_name: name,
-            bio: bio,
-            is_seller: isSeller,
-            is_buyer: isBuyer,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
-            location: {
-              city: '',
-              zip_code: '',
-              country: 'US'
-            }
-          });
+      if (updateError) {
+        console.error('DIRECT UPDATE: Database update failed:', updateError);
+        throw new Error(`Failed to update profile: ${updateError.message}`);
       }
       
-      console.log('Profile save result:', result);
+      console.log('DIRECT UPDATE: Profile updated successfully:', updateResult);
       
-      if (result.error) {
-        console.error('Profile update error:', result.error);
-        throw result.error;
+      // Step 4: Refresh user data and navigate
+      try {
+        if (fetchCurrentUser) {
+          console.log('DIRECT UPDATE: Refreshing user context');
+          await fetchCurrentUser();
+        }
+      } catch (refreshError) {
+        console.error('DIRECT UPDATE: Failed to refresh user context:', refreshError);
+        // Continue even if refresh fails
       }
       
-      console.log('Profile updated successfully with name:', name);
+      // Step 5: Navigate to main app
+      console.log('DIRECT UPDATE: Navigation to main app');
+      setIsLoading(false);
+      router.replace('/(tabs)/nearby');
       
-      // Navigate to the next onboarding step
-      router.push('/(onboarding)/permissions');
     } catch (error) {
-      console.error('Error saving profile:', error);
+      console.error('DIRECT UPDATE: Overall profile update failed:', error);
+      log.error(`Error saving profile: ${error}`);
       setErrorMsg('Failed to save your profile. Please try again.');
-    } finally {
       setIsLoading(false);
     }
   };
-
+  
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       <View style={styles.content}>
@@ -268,13 +480,41 @@ export default function ProfileSetup() {
       {isLoading ? (
         <ActivityIndicator size="large" color="#007AFF" style={styles.loader} />
       ) : (
-        <TouchableOpacity 
-          style={[styles.button, !name && styles.buttonDisabled]} 
-          onPress={handleContinue}
-          disabled={!name}
-        >
-          <Text style={styles.buttonText}>Continue</Text>
-        </TouchableOpacity>
+        <>
+          <TouchableOpacity
+            style={[styles.button, !name && styles.buttonDisabled]}
+            onPress={handleSubmit}
+            disabled={!name}
+          >
+            <Text style={styles.buttonText}>Continue</Text>
+          </TouchableOpacity>
+          
+          {/* Diagnostic tools section */}
+          <View style={{
+            marginTop: 20,
+            padding: 10,
+            backgroundColor: '#f0f0f0',
+            borderRadius: 8,
+            marginBottom: 20
+          }}>
+            <Text style={{
+              fontWeight: 'bold',
+              marginBottom: 10,
+              textAlign: 'center'
+            }}>🔍 Diagnostic Tools</Text>
+            <TouchableOpacity
+              style={{
+                backgroundColor: '#007AFF',
+                padding: 10,
+                borderRadius: 8,
+                alignItems: 'center'
+              }}
+              onPress={() => {}}
+            >
+              <Text style={{ color: 'white', fontWeight: 'bold' }}>Run Database Tests</Text>
+            </TouchableOpacity>
+          </View>
+        </>
       )}
     </ScrollView>
   );
